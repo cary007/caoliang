@@ -2,7 +2,7 @@ int main(int argc, char **argv)
 {
 	int ret;
 
-	nvme.extensions->parent = &nvme;
+	nvme.extensions->parent = &nvme
 	if (argc < 2) {
 		general_help(&builtin);
 		return 0;
@@ -13,5 +13,4 @@ int main(int argc, char **argv)
 	if (ret == -ENOTTY)
     general_help(&builtin);
 
-	return ret;
 }
