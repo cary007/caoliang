@@ -1,0 +1,102 @@
+// Jenkins credential to use
+gitCredentials='f8bf03c4-20f1-497f-8e5b-724bcecdaee9'
+
+// branch, tag or commit to checkout and build
+buildURL='ssh://git@gitlab.bwiot.co:10022/production/pipeline.git'
+buildBranch='master'
+
+frontURL='ssh://git@gitlab.bwiot.co:10022/bluewhale-iot/iot-plat.git'
+//frontBranch='master'
+frontBranch='$TAG'
+
+backendURL='ssh://git@gitlab.bwiot.co:10022/bluewhale-iot/backend-ui.git'
+//backendBranch='master'
+backendBranch='$TAG'
+
+// name of Jenkins slave build nodes to run on, blank for any
+nodeFilter='Slave-66'
+
+// set and erase Jenkins job properties
+properties([
+  buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '10')),
+  disableConcurrentBuilds(),
+  parameters([
+    string(defaultValue: 'v1.0.3', description: 'The version of the code.', name: 'TAG')
+  ])
+])
+
+echo 'gitCredentials: '+gitCredentials
+echo 'buildURL: '+buildURL
+echo 'buildBranch: '+buildBranch
+echo 'nodeFilter: '+nodeFilter
+
+// only run on a node defined by nodeFilter
+node(nodeFilter) {
+  try {
+    stage('Clean Workspace') {
+      step([$class: 'WsCleanup'])
+    }
+    stage('Checkout Code') {
+      checkout([$class: 'GitSCM', doGenerateSubmoduleConfigurations: false, submoduleCfg: [],
+        extensions: [[$class: 'CloneOption', depth: 0, noTags: false, reference: '', shallow: false, timeout: 20]],
+        branches: [[name: buildBranch]],
+        userRemoteConfigs: [[credentialsId: gitCredentials, url: buildURL]]])
+
+      dir('front'){
+        checkout([$class: 'GitSCM', doGenerateSubmoduleConfigurations: false, submoduleCfg: [],
+          extensions: [[$class: 'CloneOption', depth: 0, noTags: false, reference: '', shallow: false, timeout: 20]],
+          branches: [[name: frontBranch]],
+          userRemoteConfigs: [[credentialsId: gitCredentials, url: frontURL]]])
+      }
+
+      dir('backend'){
+        checkout([$class: 'GitSCM', doGenerateSubmoduleConfigurations: false, submoduleCfg: [],
+          extensions: [[$class: 'CloneOption', depth: 0, noTags: false, reference: '', shallow: false, timeout: 20]],
+          branches: [[name: backendBranch]],
+          userRemoteConfigs: [[credentialsId: gitCredentials, url: backendURL]]])
+       }
+      
+
+    }
+    stage('Build frontend code') {
+      dir ('front') {
+        //nodejs('Node10.14.2') {
+        sh 'which npm'
+        sh 'npm set config registry https://registry.npm.taobao.org'
+        sh 'npm install'
+        sh 'npm run build'
+        //}
+      }
+    }
+    stage('Build Node code') {
+      dir ('backend') {
+       //nodejs('Node10.14.2') {
+        sh 'which npm'
+        sh 'npm set config registry https://registry.npm.taobao.org'
+        sh 'npm install'
+        sh 'npm run build'
+        //}
+      }
+    }
+
+    stage('Copy file to nginx') {
+        sh 'pwd'
+        sh 'cp -a front/build/* iot-web/nginx/nginx/front/'
+        sh 'cp -a backend/build/* iot-web/nginx/nginx/front/back/'
+    }
+
+    stage('Build Nginx Docker images') {
+        sh 'chmod +x ./iot-web/build.sh'
+        sh './iot-web/build.sh $TAG'
+    }
+    stage('Make charts') {
+      dir('iot-web'){
+        sh 'chmod +x ./rancher-charts.sh'
+        sh ' ./rancher-charts.sh $TAG'
+      }
+    }
+  } catch (joberr) {
+    currentBuild.result='FAILURE'
+  }
+}
+
